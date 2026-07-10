@@ -42,8 +42,13 @@ python3 scripts/generate_video.py "PROMPT" FILE.mp4
 ```
 
 Options: `--size` `720x1280` (portrait, default) or `1280x720` (landscape) ·
-`--seconds` `4` (default) / `8` / `12` · `--timeout` (default 900). If the filename
-has no extension, `.mp4` is appended.
+`--seconds` `4` (default) / `8` / `12` · `--image PATH` (image→video, must match
+`--size`) · `--remix video_...` (remix a prior generation) · `--timeout` (default 900).
+If the filename has no extension, `.mp4` is appended.
+
+Three input modes: **text→video** (default), **image→video** (`--image`, a first-frame
+anchor matching `--size`; faces are rejected), and **remix/video→video** (`--remix`,
+re-render a previous generation — inherits its size/duration).
 
 See [`SKILL.md`](SKILL.md) for full details and examples.
 

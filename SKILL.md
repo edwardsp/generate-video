@@ -1,6 +1,6 @@
 ---
 name: generate-video
-description: "Generate a video from a text prompt and save it to a file using Azure AI Foundry (Sora 2). Use when the user asks to 'generate a video', 'create a video', 'make a clip', 'animate', or 'render a video' and wants it saved to a filename. Requires a prompt and an output filename; optional size and duration. Backed by the paul-ai-models Foundry deployment. Generation is async and takes ~1-5 minutes."
+description: "Generate a video from a text prompt and save it to a file using Azure AI Foundry (Sora 2). Supports text->video, image->video (a starting reference image), and remixing a previous generation (video->video). Use when the user asks to 'generate a video', 'create a video', 'make a clip', 'animate an image', 'remix/edit a video', or 'render a video' and wants it saved to a filename. Requires a prompt and an output filename; optional starting image, remix id, size, and duration. Backed by the paul-ai-models Foundry deployment. Generation is async and takes ~1-5 minutes."
 ---
 
 # generate-video
@@ -48,7 +48,23 @@ appended.
 - `--out`, `-o` — output file path (required; `.mp4` added if missing)
 - `--size`, `-s` — `720x1280` (portrait, default) or `1280x720` (landscape)
 - `--seconds`, `-n` — clip length: `4` (default), `8`, or `12`
+- `--image`, `-i` — starting reference image for **image→video** (must match `--size`)
+- `--remix` — `video_...` id of a prior generation to **remix** (video→video)
 - `--timeout`, `-t` — max seconds to wait for the job (default `900`)
+
+## Input modes
+
+The tool prints the generated clip's id (`job video_...`) to stderr — keep it if you
+might remix later.
+
+- **text→video** (default): prompt only.
+- **image→video** (`--image PATH`): the image is the first-frame anchor. It must match
+  `--size` **exactly** (e.g. a 1280×720 image for `-s 1280x720`) and be jpeg/png/webp.
+  Images containing human faces are rejected by Sora 2.
+- **remix / video→video** (`--remix video_...`): re-render a **previous generation**
+  with a new prompt (reuses its structure/motion/framing). Remix **inherits the source
+  clip's size and duration**, so `--size`/`--seconds` are ignored. You can only remix
+  clips generated through this API (stored server-side), not arbitrary local MP4s.
 
 ### Config overrides (env)
 
@@ -64,9 +80,17 @@ python3 ~/.config/opencode/skills/generate-video/scripts/generate_video.py \
   -p "wide aerial shot of a misty pine forest at dawn, slow push in, cinematic" \
   -o ~/Videos/forest.mp4 -s 1280x720 -n 8
 
-# Quick square clip
+# Quick portrait clip
 python3 ~/.config/opencode/skills/generate-video/scripts/generate_video.py \
   "a paper boat floating down a rain gutter, close up" boat.mp4 -s 720x1280 -n 4
+
+# Image -> video (animate a starting frame; image must be 1280x720 here)
+python3 ~/.config/opencode/skills/generate-video/scripts/generate_video.py \
+  "clouds drift, slow camera push-in" out.mp4 --image start.png -s 1280x720
+
+# Remix a previous generation (new look, same motion)
+python3 ~/.config/opencode/skills/generate-video/scripts/generate_video.py \
+  "same scene at golden-hour sunset" sunset.mp4 --remix video_6a50902f0fa08190857ed72c2c414c86
 ```
 
 ## Notes

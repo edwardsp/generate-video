@@ -51,6 +51,8 @@ def parse_args(argv):
     ap.add_argument("--size", "-s", default="720x1280")
     ap.add_argument("--seconds", "-n", type=int, default=4)
     ap.add_argument("--timeout", "-t", type=int, default=900)
+    ap.add_argument("--image", "-i", help="starting reference image (image->video); must match --size")
+    ap.add_argument("--remix", help="video_... id of a prior generation to remix (video->video)")
     ap.add_argument("pos", nargs="*", help="positional: PROMPT OUTFILE")
     a = ap.parse_args(argv)
     if not a.prompt and len(a.pos) >= 1:
@@ -95,6 +97,37 @@ def http_bytes(url, key):
         sys.exit(f"ERROR: could not download video: {e.reason}")
 
 
+def guess_mime(path):
+    ext = os.path.splitext(path)[1].lower()
+    return {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".png": "image/png", ".webp": "image/webp"}.get(ext, "application/octet-stream")
+
+
+def http_multipart(url, key, fields, filename, filedata, filemime):
+    boundary = "----agencyLazyVideo" + os.urandom(12).hex()
+    body = bytearray()
+    for k, v in fields.items():
+        body += (f"--{boundary}\r\n"
+                 f'Content-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n').encode()
+    body += (f"--{boundary}\r\n"
+             f'Content-Disposition: form-data; name="input_reference"; filename="{filename}"\r\n'
+             f"Content-Type: {filemime}\r\n\r\n").encode()
+    body += filedata + b"\r\n"
+    body += f"--{boundary}--\r\n".encode()
+    req = urllib.request.Request(
+        url, data=bytes(body),
+        headers={"api-key": key, "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        sys.exit(f"ERROR: HTTP {e.code} creating video\n{e.read().decode(errors='replace')}")
+    except urllib.error.URLError as e:
+        sys.exit(f"ERROR: could not reach endpoint: {e.reason}")
+
+
 def main(argv):
     args = parse_args(argv)
     load_env_file(FOUNDRY_ENV)
@@ -113,16 +146,33 @@ def main(argv):
     api_version = os.environ.get("AZURE_OPENAI_VIDEO_API_VERSION", "preview")
 
     create_url = f"{endpoint}/openai/v1/videos?api-version={api_version}"
-    job = http_json(create_url, key, method="POST", body={
-        "model": deployment,
-        "prompt": args.prompt,
-        "seconds": str(args.seconds),
-        "size": f"{args.width}x{args.height}",
-    })
+    size = f"{args.width}x{args.height}"
+    if args.image:
+        if not os.path.isfile(args.image):
+            sys.exit(f"ERROR: image not found: {args.image}")
+        with open(args.image, "rb") as fh:
+            img = fh.read()
+        job = http_multipart(
+            create_url, key,
+            {"model": deployment, "prompt": args.prompt, "seconds": str(args.seconds), "size": size},
+            os.path.basename(args.image), img, guess_mime(args.image),
+        )
+        mode = f"image->video from {os.path.basename(args.image)}"
+    elif args.remix:
+        remix_url = f"{endpoint}/openai/v1/videos/{args.remix}/remix?api-version={api_version}"
+        job = http_json(remix_url, key, method="POST", body={"prompt": args.prompt})
+        mode = f"remix of {args.remix}"
+    else:
+        job = http_json(create_url, key, method="POST", body={
+            "model": deployment, "prompt": args.prompt,
+            "seconds": str(args.seconds), "size": size,
+        })
+        mode = "text->video"
     job_id = job.get("id")
     if not job_id:
         sys.exit("ERROR: no job id in response:\n" + json.dumps(job)[:800])
-    print(f"job {job_id} created ({args.width}x{args.height}, {args.seconds}s); waiting...", file=sys.stderr)
+    detail = mode if args.remix else f"{size}, {args.seconds}s, {mode}"
+    print(f"job {job_id} created ({detail}); waiting...", file=sys.stderr)
 
     status_url = f"{endpoint}/openai/v1/videos/{job_id}?api-version={api_version}"
     deadline = time.time() + args.timeout
