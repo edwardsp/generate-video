@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Never commit credentials / local env
+*.env
+.env
+foundry.env
+
+# Test artifacts
+*.mp4
